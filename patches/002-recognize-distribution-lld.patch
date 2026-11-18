@@ -1,0 +1,16 @@
+diff --git a/configure b/configure
+--- a/configure
++++ b/configure
+@@ -5178,3 +5178,3 @@
+     ;;
+-  "LLD"*)
++  "LLD "*|*" LLD "*)
+   # Accept LLD 13.0.0 or higher
+diff --git a/configure.ac b/configure.ac
+--- a/configure.ac
++++ b/configure.ac
+@@ -515,3 +515,3 @@
+     ;;
+-  "LLD"*)
++  "LLD "*|*" LLD "*)
+   # Accept LLD 13.0.0 or higher
