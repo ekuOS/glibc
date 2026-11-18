@@ -1,0 +1,30 @@
+diff --git a/configure b/configure
+--- a/configure
++++ b/configure
+@@ -9328,4 +9328,4 @@
+   e)   libc_cv_libgcc_usable=no
+-  libgcc_name=`${CC-cc} $CFLAGS $CPPFLAGS -print-libgcc-file-name | sed 's:.*/::'`
+-  case "$libgcc_name" in
++  libgcc_file=`${CC-cc} $CFLAGS $CPPFLAGS -print-libgcc-file-name`
++  case "${libgcc_file##*/}" in
+     libgcc*)
+@@ -9336,3 +9336,3 @@
+     libclang_rt*)
+-      libc_cv_libgcc=-lclang_rt.builtins
++      libc_cv_libgcc=$libgcc_file
+       libc_cv_libgcc_eh=
+diff --git a/configure.ac b/configure.ac
+--- a/configure.ac
++++ b/configure.ac
+@@ -2105,4 +2105,4 @@
+   libc_cv_libgcc_usable=no
+-  libgcc_name=`${CC-cc} $CFLAGS $CPPFLAGS -print-libgcc-file-name | sed 's:.*/::'`
+-  case "$libgcc_name" in
++  libgcc_file=`${CC-cc} $CFLAGS $CPPFLAGS -print-libgcc-file-name`
++  case "${libgcc_file##*/}" in
+     libgcc*)
+@@ -2113,3 +2113,3 @@
+     libclang_rt*)
+-      libc_cv_libgcc=-lclang_rt.builtins
++      libc_cv_libgcc=$libgcc_file
+       libc_cv_libgcc_eh=
