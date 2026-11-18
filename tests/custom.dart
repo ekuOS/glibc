@@ -202,6 +202,15 @@ Future<bool> runCustomTests(Directory directory) async {
     });
     for (final isStatic in [false, true]) {
       final mode = isStatic ? 'static' : 'shared';
+      await test('glibc runtime ($mode)', () async {
+        final binary = await suite.compile(
+          'libc.cpp',
+          'libc-$mode',
+          static: isStatic,
+        );
+        await suite.runProbe(binary, arguments: [if (!isStatic) suite.libc]);
+        return null;
+      });
       await test('Allocator ABI ($mode)', () async {
         final binary = await suite.compile(
           'allocator.cpp',

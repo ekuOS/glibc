@@ -53,7 +53,7 @@ The fork keeps glibc's allocation entry points and symbol versions, including th
 
 ## Verification
 
-Run `dart run test.dart` after building, or pass `--output PATH` to select a different build directory. The Dart runner checks the ELF hardening of `libc.so` and the loader, the allocator ABI in shared and static programs, and SHSTK compatibility with legacy libraries at startup and during `dlopen`. Clang++ compiles the C++20 fixtures using the build's startup objects and libc. The static test also requires `libgcc_eh.a`, and the runtime tests use GNU `timeout`. SHSTK runtime checks are skipped on unsupported platforms.
+Run `dart run test.dart` after building, or pass `--output PATH` to select a different build directory. The runtime smoke tests exercise stdio, the C locale, and numeric address resolution in shared and static executables. The shared test verifies that the executable loaded the selected build's `libc.so`. The runner also checks ELF hardening, the allocator ABI, and SHSTK compatibility with legacy libraries at startup and during `dlopen`. Clang++ compiles the C++20 fixtures using the build's startup objects and libc. Static tests also require `libgcc_eh.a`, and the runtime tests use GNU `timeout`. SHSTK runtime checks are skipped on unsupported platforms.
 
 The fork was built on x86-64 Linux with Clang and LLD 22.1.8. Dynamic and static smoke tests exercised allocation, alignment, cross-thread frees, and allocation in a `fork` child handler. The shared libc's exported symbol names and versions were also compared with unpatched glibc 2.44 on the same host. These checks do not replace the full glibc test suite.
 
