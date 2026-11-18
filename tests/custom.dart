@@ -220,6 +220,14 @@ Future<bool> runCustomTests(Directory directory) async {
         shared: true,
       );
       final binary = await suite.compile('cet.cpp', 'cet', cet: true);
+      // ARCH_SHSTK_STATUS can succeed even if the CPU has no usable SHSTK.
+      final cpuInfo = await File('/proc/cpuinfo').readAsString();
+      if (!RegExp(
+        r'^flags\s*:[^\n]*\buser_shstk\b',
+        multiLine: true,
+      ).hasMatch(cpuInfo)) {
+        return 'CPU or kernel does not support userspace shadow stack';
+      }
       const shstk = {'GLIBC_TUNABLES': 'glibc.cpu.hwcaps=SHSTK'};
       await suite.runProbe(
         binary,
