@@ -337,6 +337,15 @@ Future<void> build(Options options) async {
     if (result.exitCode != 0) throw BuildFailure('Cannot run $tool --version');
   }
 
+  final target = await Process.run('clang', ['-dumpmachine']);
+  if (target.exitCode != 0 || (target.stdout as String).trim().isEmpty) {
+    throw BuildFailure('Cannot determine Clang target: ${target.stderr}');
+  }
+  final enableCet =
+      (target.stdout as String).trim().split('-').first == 'x86_64';
+  const stackClash = '-fstack-clash-protection';
+  final cflags = environment['CFLAGS'] ?? '-g -O2';
+  environment['CFLAGS'] = '$cflags $stackClash';
   environment['libc_cv_sfp_handle_exceptions'] =
       await softFloatRuntimeSupport();
   await prepareSource(source, options.repo, options.tag, defaultTag);
@@ -369,6 +378,11 @@ Future<void> build(Options options) async {
     '-fvisibility=hidden',
     '-ftls-model=initial-exec',
     '-fstack-protector-strong',
+    stackClash,
+    '-U_FORTIFY_SOURCE',
+    '-D_FORTIFY_SOURCE=3',
+    // The linker keeps CET properties only when all input objects have them.
+    if (enableCet) '-fcf-protection=full',
     '-pthread',
     '-DNDEBUG',
     '-DMI_SECURE=4',
@@ -390,6 +404,10 @@ Future<void> build(Options options) async {
       '--prefix=/usr',
       '--disable-werror',
       '--disable-static-c++-link-check',
+      '--enable-stack-protector=strong',
+      '--enable-fortify-source=3',
+      '--enable-bind-now',
+      if (enableCet) '--enable-cet=permissive',
       if (headers != null) '--with-headers=$headers',
     ],
     cwd: output,
