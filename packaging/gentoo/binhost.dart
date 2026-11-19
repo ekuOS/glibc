@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import '../../build.dart' as glibc;
@@ -70,7 +71,11 @@ Future<void> patchEbuild(String pkgdir, File mimalloc) async {
   await aux.create();
   final bundled = await Directory('$project/patches')
       .list()
-      .where((entry) => entry is File && entry.path.endsWith('.patch'))
+      .where(
+        (entry) =>
+            entry is File &&
+            (entry.path.endsWith('.patch') || entry.path.endsWith('.diff')),
+      )
       .cast<File>()
       .toList();
   for (final file in [...bundled, File('$project/shim/eku-malloc.c')]) {
@@ -109,34 +114,77 @@ Future<void> checkInstalledPackage(
   for (final abi in abis) {
     final libdir = abi == '64' ? 'lib64' : 'lib';
     final libc = await File('/usr/$libdir/libc.so.6').resolveSymbolicLinks();
-    for (final fixture in ['libc', 'allocator']) {
-      final binary = '${scratch.path}/$fixture-$abi';
-      await glibc.run('clang++', [
-        '-m$abi',
-        '-std=c++20',
-        '-O2',
-        '-fno-builtin',
-        '-fno-exceptions',
-        '-fno-rtti',
-        '-pthread',
-        '-fuse-ld=lld',
-        '--rtlib=compiler-rt',
-        '$project/tests/$fixture.cpp',
-        '-o',
-        binary,
-      ], environment: environment);
-      await glibc.run('timeout', ['30s', binary, if (fixture == 'libc') libc]);
+    final unwind = await capture('clang', [
+      '-m$abi',
+      '-print-file-name=libgcc_eh.a',
+    ], environment: environment);
+    if (!await File(unwind).exists()) {
+      throw glibc.BuildFailure('Missing libgcc_eh.a for x86-$abi');
     }
-    stdout.writeln('PASS Gentoo binpkg runtime (x86-$abi)');
+    for (final fixture in ['libc', 'allocator']) {
+      for (final static in [false, true]) {
+        final mode = static ? 'static' : 'shared';
+        final binary = '${scratch.path}/$fixture-$abi-$mode';
+        await glibc.run('clang++', [
+          glibc.clangDriverOption,
+          '-m$abi',
+          '-std=c++20',
+          '-O2',
+          '-fno-builtin',
+          '-fno-exceptions',
+          '-fno-rtti',
+          '-pthread',
+          '-fuse-ld=lld',
+          '--rtlib=compiler-rt',
+          if (static) ...['-static', '-nostdlib++'],
+          '$project/tests/$fixture.cpp',
+          if (static) ...[
+            '-Wl,--start-group',
+            '-lc',
+            unwind,
+            '-Wl,--end-group',
+          ],
+          '-o',
+          binary,
+        ], environment: environment);
+        await glibc.run('timeout', [
+          '--kill-after=5s',
+          '30s',
+          binary,
+          if (!static && fixture == 'libc') libc,
+        ]);
+        stdout.writeln('PASS Gentoo binpkg $fixture ($mode, x86-$abi)');
+      }
+    }
   }
-  final properties = await capture('llvm-readelf', [
-    '-n',
-    '/usr/lib64/libc.so.6',
+  // Gentoo preserves the loader's symbols but may strip libc's .comment.
+  const loader = '/lib64/ld-linux-x86-64.so.2';
+  final toolchain = await capture('llvm-readelf', [
+    '-p',
+    '.comment',
+    loader,
   ], environment: environment);
-  if (!properties.contains('IBT, SHSTK')) {
-    throw const glibc.BuildFailure(
-      'The installed amd64 libc is missing CET properties',
-    );
+  if (!toolchain.contains('Linker: LLD') ||
+      !toolchain.contains('clang version')) {
+    throw glibc.BuildFailure('$loader was not built with Clang and LLD');
+  }
+  for (final elf in ['/usr/lib64/libc.so.6', loader]) {
+    final properties = await capture('llvm-readelf', [
+      '-n',
+      '-l',
+      '-d',
+      elf,
+    ], environment: environment);
+    if (!properties.contains('IBT, SHSTK') ||
+        !properties.contains('GNU_RELRO') ||
+        !RegExp(r'\(FLAGS(?:_1)?\)[^\n]*\b(?:BIND_NOW|NOW)\b')
+            .hasMatch(properties) ||
+        !RegExp(
+          r'^\s*GNU_STACK(?:[ \t]+0x[0-9a-f]+){5}[ \t]+[RW ]+[ \t]+0x[0-9a-f]+$',
+          multiLine: true,
+        ).hasMatch(properties)) {
+      throw glibc.BuildFailure('Unexpected ELF hardening for $elf');
+    }
   }
 }
 
@@ -176,7 +224,14 @@ Future<void> archiveSources(
   ]);
   await glibc.run('cp', [
     '-a',
-    for (final name in ['LICENSE', 'build.dart', 'patches', 'shim', 'tests'])
+    for (final name in [
+      'LICENSE',
+      'build.dart',
+      'test.dart',
+      'patches',
+      'shim',
+      'tests',
+    ])
       '$project/$name',
     '$project/.github/workflows/binhost.yml',
     '$sources/',
@@ -210,6 +265,7 @@ Future<Map<String, String>> installToolchain(List<String> abis) async {
 
   Future<File> builtins(String abi) async => File(
     await capture('clang', [
+      glibc.clangDriverOption,
       '-m$abi',
       '--rtlib=compiler-rt',
       '-print-libgcc-file-name',
@@ -231,13 +287,7 @@ Future<Map<String, String>> installToolchain(List<String> abis) async {
     await glibc.run('emerge', [
       '--oneshot',
       '--getbinpkg',
-      '--onlydeps',
-      runtime,
-    ], environment: environment);
-    await glibc.run('emerge', [
-      '--oneshot',
-      '--getbinpkg=n',
-      '--usepkg=n',
+      '--usepkg-exclude=$runtime',
       runtime,
     ], environment: environment);
   }
@@ -284,6 +334,8 @@ Future<void> buildPackage(String output) async {
     'package.accept_keywords/ekuos-glibc',
     '$atom ~amd64',
   );
+  // Gentoo masks this experimental flag on the stock GCC profiles.
+  await writePortageSetting('profile/package.use.mask', '$atom -clang');
   await writePortageSetting(
     'package.use/ekuos-glibc',
     '$atom cet clang multiarch ssp static-libs $use',
@@ -317,6 +369,7 @@ Future<void> buildPackage(String output) async {
     '--oneshot',
     '--usepkgonly',
     '--binpkg-respect-use=y',
+    '--reinstall-atoms=$package',
     atom,
   ], environment: environment);
 
@@ -335,6 +388,48 @@ Future<void> buildPackage(String output) async {
   }
 }
 
+Future<void> importSigningKey(String signing) async {
+  // The first line is the optional passphrase. The remaining stdin is the
+  // armored private key. Neither secret is passed as an argument or env var.
+  final input = await stdin.transform(utf8.decoder).join();
+  final boundary = input.indexOf('\n');
+  if (boundary < 0 ||
+      !input
+          .substring(boundary + 1)
+          .trimLeft()
+          .startsWith('-----BEGIN PGP PRIVATE KEY BLOCK-----')) {
+    throw const glibc.BuildFailure(
+      'Expected a passphrase line and an armored private key',
+    );
+  }
+  if (boundary > 0) {
+    // The signing home is mode 0700 and is deleted after signing.
+    final passphraseFile = await File('$signing/passphrase').create();
+    await glibc.run('chmod', ['600', passphraseFile.path]);
+    await passphraseFile.writeAsString('${input.substring(0, boundary)}\n');
+    await File('$signing/gpg.conf').writeAsString(
+      'pinentry-mode loopback\npassphrase-file ${passphraseFile.path}\n',
+    );
+  }
+  final process = await Process.start('gpg', [
+    '--homedir',
+    signing,
+    '--batch',
+    '--import',
+  ]);
+  // Do not print import output: malformed input must not leak key material.
+  final output = Future.wait([
+    process.stdout.drain<void>(),
+    process.stderr.drain<void>(),
+  ]);
+  process.stdin.write(input.substring(boundary + 1));
+  await process.stdin.close();
+  await output;
+  if (await process.exitCode != 0) {
+    throw const glibc.BuildFailure('Could not import the binhost signing key');
+  }
+}
+
 Future<void> signPackage(String output) async {
   final scratch = await Directory.systemTemp.createTemp('ekuos-signing-');
   final signing = '${scratch.path}/sign';
@@ -343,7 +438,7 @@ Future<void> signPackage(String output) async {
     await glibc.run('chmod', ['755', scratch.path]);
     await glibc.run('install', ['-d', '-m700', signing, verification]);
     await Directory('/run/lock').create(recursive: true);
-    await glibc.run('gpg', ['--homedir', signing, '--batch', '--import']);
+    await importSigningKey(signing);
     final listing = await capture('gpg', [
       '--homedir',
       signing,
@@ -412,6 +507,7 @@ Future<void> signPackage(String output) async {
       throw const glibc.BuildFailure('Expected exactly one glibc GPKG');
     }
     final packagePath = packages.single.path;
+    final relativePath = packagePath.substring(output.length + 1);
     final environment = {
       ...Platform.environment,
       'PKGDIR': output,
@@ -419,24 +515,35 @@ Future<void> signPackage(String output) async {
       'BINPKG_GPG_SIGNING_GPG_HOME': signing,
       'BINPKG_GPG_VERIFY_GPG_HOME': verification,
       'BINPKG_GPG_SIGNING_KEY': fingerprint,
+      'FEATURES': 'binpkg-request-signature',
     };
-    // Portage owns the GPKG format and regenerates its package index.
-    await glibc.run('python3', [
-      '-c',
-      'import sys, portage; from portage.gpkg import gpkg; '
-          'gpkg(portage.settings, gpkg_file=sys.argv[1]).update_signature(); '
-          'gpkg(portage.settings, gpkg_file=sys.argv[1], verify_signature=True).get_metadata()',
+    // Portage verifies signatures while regenerating the index below.
+    await glibc.run('gpkg-sign', [
+      '--allow-unsigned',
       packagePath,
     ], environment: environment);
     await glibc.run('chmod', ['a+r', packagePath]);
+    // Do not carry the unsigned package's cached digest into the signed index.
+    for (final name in ['Packages', 'Packages.gz']) {
+      final index = File('$output/$name');
+      if (await index.exists()) await index.delete();
+    }
     await glibc.run('emaint', ['binhost', '--fix'], environment: environment);
     await glibc.run('emaint', ['binhost', '--check'], environment: environment);
     final index = await File('$output/Packages').readAsLines();
-    if (!index.contains('CPV: $package-$version')) {
-      throw const glibc.BuildFailure('The Portage index omitted glibc');
+    for (final entry in [
+      'PACKAGES: 1',
+      'CPV: $package-$version',
+      'SLOT: 2.2',
+      'REPO: gentoo',
+      'PATH: $relativePath',
+    ]) {
+      if (!index.contains(entry)) {
+        throw glibc.BuildFailure('Missing Portage index entry: $entry');
+      }
     }
     final sums = await capture('sha256sum', [
-      packagePath.substring(output.length + 1),
+      relativePath,
       'source.tar.xz',
     ], cwd: output);
     await File('$output/SHA256SUMS').writeAsString('$sums\n');
@@ -449,6 +556,12 @@ Future<void> signPackage(String output) async {
 Future<void> main(List<String> args) async {
   try {
     switch (args.firstOrNull) {
+      case 'prepare' when args.length == 4:
+        await glibc.prepareAllocator(
+          args[1],
+          Directory(args[2]),
+          File(args[3]),
+        );
       case 'mimalloc' when args.length >= 4:
         await glibc.compileMimalloc(
           args[1],
@@ -460,6 +573,10 @@ Future<void> main(List<String> args) async {
         stdout.writeln(
           await glibc.softFloatRuntimeSupport(args.skip(1).toList()),
         );
+      case 'hardening' when args.length == 1:
+        stdout.writeln('${glibc.bindNow} ${glibc.fortify}');
+      case 'cet' when args.length == 1:
+        stdout.writeln(glibc.permissiveCet);
       case 'build' when args.length == 1:
         await buildPackage('/output/${requiredEnv('BINHOST_PATH')}');
       case 'sign' when args.length == 1:

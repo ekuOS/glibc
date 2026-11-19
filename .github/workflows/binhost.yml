@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Sign and publish to GitHub Pages
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -14,29 +19,14 @@ concurrency:
 
 jobs:
   build-binpkg:
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-26.04
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && !inputs.publish)
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - stage: amd64-openrc
-            profile: default/linux/amd64/23.0
-            path: amd64/23.0/openrc
-            use: multilib -systemd
-            abis: '64 32'
-          - stage: amd64-nomultilib-systemd
-            profile: default/linux/amd64/23.0/no-multilib/systemd
-            path: amd64/23.0/no-multilib/systemd
-            use: -multilib systemd
-            abis: '64'
     env:
-      GENTOO_STAGE: ${{ matrix.stage }}
-      GENTOO_PROFILE: ${{ matrix.profile }}
-      BINHOST_PATH: ${{ matrix.path }}
-      GLIBC_USE: ${{ matrix.use }}
-      GLIBC_ABIS: ${{ matrix.abis }}
+      GENTOO_PROFILE: default/linux/amd64/23.0/no-multilib/systemd
+      BINHOST_PATH: amd64/23.0/no-multilib/systemd
+      GLIBC_USE: -multilib systemd
+      GLIBC_ABIS: '64'
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -54,7 +44,7 @@ jobs:
 
       - name: Prepare Gentoo builder
         run: |
-          docker build --pull --build-arg "GENTOO_STAGE=$GENTOO_STAGE" \
+          docker build --pull \
             --file packaging/gentoo/Containerfile --tag ekuos-glibc-binhost packaging/gentoo
 
       - name: Build and test Gentoo binpkg
@@ -68,43 +58,51 @@ jobs:
             ekuos-glibc-binhost /usr/local/bin/ekuos-binhost build
 
       - name: Sign package and update index
+        if: github.event_name == 'push' || inputs.publish
         env:
           BINHOST_GPG_PRIVATE_KEY: ${{ secrets.BINHOST_GPG_PRIVATE_KEY }}
+          BINHOST_GPG_PASSPHRASE: ${{ secrets.BINHOST_GPG_PASSPHRASE }}
         run: |
           if [[ -z "$BINHOST_GPG_PRIVATE_KEY" ]]; then
             echo '::error::Set the BINHOST_GPG_PRIVATE_KEY Actions secret before publishing.'
             exit 1
           fi
-          printf '%s\n' "$BINHOST_GPG_PRIVATE_KEY" | docker run --rm -i --network=none \
+          if [[ "$BINHOST_GPG_PASSPHRASE" == *$'\n'* || "$BINHOST_GPG_PASSPHRASE" == *$'\r'* ]]; then
+            echo '::error::BINHOST_GPG_PASSPHRASE must be a single line.'
+            exit 1
+          fi
+          printf '%s\n%s\n' "$BINHOST_GPG_PASSPHRASE" "$BINHOST_GPG_PRIVATE_KEY" | docker run --rm -i --network=none \
             -e BINHOST_PATH \
             -v "$RUNNER_TEMP/binhost:/output" \
             -v "$RUNNER_TEMP/ekuos-binhost:/usr/local/bin/ekuos-binhost:ro" \
             ekuos-glibc-binhost /usr/local/bin/ekuos-binhost sign
 
       - name: Save signed binrepo
+        if: github.event_name == 'push' || inputs.publish
         uses: actions/upload-artifact@v7
         with:
-          name: binhost-${{ matrix.stage }}
+          name: gentoo-binhost
           path: ${{ runner.temp }}/binhost
           if-no-files-found: error
           compression-level: 0
 
   assemble-pages:
     needs: build-binpkg
-    runs-on: ubuntu-26.04
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.publish)
+    runs-on: ubuntu-24.04
     steps:
-      - name: Collect signed binrepos
+      - name: Download signed binrepo
         uses: actions/download-artifact@v8
         with:
-          pattern: binhost-*
-          merge-multiple: true
+          name: gentoo-binhost
           path: binhost
 
       - name: Verify publication contents
         run: |
-          test -s binhost/amd64/23.0/openrc/Packages
-          test -s binhost/amd64/23.0/no-multilib/systemd/Packages
-          cmp binhost/amd64/23.0/{openrc,no-multilib/systemd}/signing-key.fingerprint
+          cd binhost/amd64/23.0/no-multilib/systemd
+          test -s Packages
+          test -s signing-key.fingerprint
+          sha256sum --check SHA256SUMS
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
@@ -113,7 +111,7 @@ jobs:
 
   deploy:
     needs: assemble-pages
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     permissions:
       pages: write
       id-token: write

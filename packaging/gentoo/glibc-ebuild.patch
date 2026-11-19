@@ -6,28 +6,38 @@
 +SRC_URI+=" https://codeload.github.com/microsoft/mimalloc/tar.gz/refs/tags/v${MIMALLOC_VERSION} -> mimalloc-${MIMALLOC_VERSION}.tar.gz"
 +
 +LICENSE="LGPL-2.1+ BSD HPND ISC inner-net rc PCRE MIT"
-@@ -1046,0 +1050 @@
+@@ -662,4 +665 @@
+-	# glibc does not work with non-bfd (for various reasons):
+-	# * gold (bug #269274)
+-	# * mold (bug #860900)
+-	tc-ld-force-bfd
++	# ekuOS uses LLD and the compatibility patches staged by build.dart.
+@@ -1046,0 +1047 @@
 +	unpack "mimalloc-${MIMALLOC_VERSION}.tar.gz"
-@@ -1078,0 +1083,6 @@
-+	local patch
-+	for patch in "${FILESDIR}"/ekuos/*.patch; do
-+		eapply "${patch}"
-+	done
-+	cp "${FILESDIR}/ekuos/eku-malloc.c" malloc/ || die
+@@ -1078,0 +1080,3 @@
++	/usr/local/bin/ekuos-binhost prepare "${S}" "${FILESDIR}/ekuos" \
++		"${FILESDIR}/ekuos/eku-malloc.c" || die
 +
-@@ -1094,0 +1105,4 @@
+@@ -1094,0 +1099,6 @@
 +	use clang && tc-is-clang || die "ekuOS glibc requires Clang"
 +	export libc_cv_sfp_handle_exceptions
 +	libc_cv_sfp_handle_exceptions=$(/usr/local/bin/ekuos-binhost soft-float ${glibc__abi_CFLAGS}) || die
++	local hardening
++	hardening=$(/usr/local/bin/ekuos-binhost hardening) || die
 +
-@@ -1115 +1129 @@
+@@ -1115 +1125,6 @@
 -		amd64-x86_64-*|x32-x86_64-*-*-gnux32) myconf+=( $(use_enable cet) ) ;;
-+		amd64-x86_64-*|x32-x86_64-*-*-gnux32) myconf+=( --enable-cet=$(usex cet permissive no) ) ;;
-@@ -1160,0 +1175 @@
-+		--disable-static-c++-link-check
-@@ -1162 +1177 @@
++		amd64-x86_64-*)
++			local cet_flag=--enable-cet=no
++			if use cet; then
++				cet_flag=$(/usr/local/bin/ekuos-binhost cet) || die
++			fi
++			myconf+=( "${cet_flag}" ) ;;
+@@ -1161,2 +1176,2 @@
+-		--enable-bind-now
 -		--enable-fortify-source
-+		--enable-fortify-source=3
++		--disable-static-c++-link-check
++		${hardening}
 @@ -1375 +1390,12 @@
 -	emake -C "$(builddir nptl)"
 +	local builddir=$(builddir nptl)

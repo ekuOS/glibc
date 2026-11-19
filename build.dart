@@ -89,13 +89,19 @@ class Options {
   }
 }
 
+// Use explicit project flags. Gentoo's default driver config force-includes a
+// fortify header that can re-enable fortification in the dynamic loader.
+const clangDriverOption = '--no-default-config';
 // Configure also probes with compile-only commands and -Werror.
 const linkerOptions =
     '--start-no-unused-arguments -fuse-ld=lld '
     '--rtlib=compiler-rt --end-no-unused-arguments';
 const stackClashProtection = '-fstack-clash-protection';
-const cCompiler = 'clang $linkerOptions';
-const cxxCompiler = 'clang++ $linkerOptions';
+const fortify = '--enable-fortify-source=3';
+const bindNow = '--enable-bind-now';
+const permissiveCet = '--enable-cet=permissive';
+const cCompiler = 'clang $clangDriverOption $linkerOptions';
+const cxxCompiler = 'clang++ $clangDriverOption $linkerOptions';
 const toolchain = {
   'CC': cCompiler,
   'CXX': cxxCompiler,
@@ -257,10 +263,29 @@ Future<void> applyPatches(Directory directory, String source) async {
   }
 }
 
+Future<void> prepareAllocator(
+  String source,
+  Directory patches,
+  File shim,
+) async {
+  if (!await File('${patches.path}/001-use-mimalloc.patch').exists() ||
+      !await shim.exists()) {
+    throw const BuildFailure('The bundled mimalloc patch or shim is missing');
+  }
+  await applyPatches(patches, source);
+  final stagedShim = File('$source/malloc/eku-malloc.c');
+  final shimContents = await shim.readAsString();
+  if (!await stagedShim.exists() ||
+      await stagedShim.readAsString() != shimContents) {
+    await stagedShim.writeAsString(shimContents);
+  }
+}
+
 Future<String> softFloatRuntimeSupport([
   List<String> compilerFlags = const [],
 ]) async {
   final runtime = await Process.run('clang', [
+    clangDriverOption,
     ...compilerFlags,
     '--rtlib=compiler-rt',
     '-print-libgcc-file-name',
@@ -295,6 +320,7 @@ Future<void> compileMimalloc(
 }) async {
   await File(object).parent.create(recursive: true);
   await run('clang', [
+    clangDriverOption,
     ...compilerFlags,
     '-std=gnu11',
     '-O2',
@@ -345,10 +371,6 @@ Future<void> build(Options options) async {
   }
   final bundled = Directory.fromUri(Platform.script.resolve('patches/'));
   final shim = File.fromUri(Platform.script.resolve('shim/eku-malloc.c'));
-  if (!await File('${bundled.path}/001-use-mimalloc.patch').exists() ||
-      !await shim.exists()) {
-    throw const BuildFailure('The bundled mimalloc patch or shim is missing');
-  }
   final patches = options.patches == null
       ? null
       : Directory(options.patches!).absolute;
@@ -392,13 +414,7 @@ Future<void> build(Options options) async {
       !await File('$source/Makeconfig').exists()) {
     throw BuildFailure('Not a glibc source tree: $source');
   }
-  await applyPatches(bundled, source);
-  final stagedShim = File('$source/malloc/eku-malloc.c');
-  final shimContents = await shim.readAsString();
-  if (!await stagedShim.exists() ||
-      await stagedShim.readAsString() != shimContents) {
-    await stagedShim.writeAsString(shimContents);
-  }
+  await prepareAllocator(source, bundled, shim);
   if (patches != null &&
       await patches.resolveSymbolicLinks() !=
           await bundled.resolveSymbolicLinks()) {
@@ -418,9 +434,9 @@ Future<void> build(Options options) async {
       '--disable-werror',
       '--disable-static-c++-link-check',
       '--enable-stack-protector=strong',
-      '--enable-fortify-source=3',
-      '--enable-bind-now',
-      if (enableCet) '--enable-cet=permissive',
+      fortify,
+      bindNow,
+      if (enableCet) permissiveCet,
       if (headers != null) '--with-headers=$headers',
     ],
     cwd: output,
