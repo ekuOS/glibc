@@ -1,0 +1,126 @@
+name: Publish Gentoo binhost
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gentoo-binhost
+  cancel-in-progress: false
+
+jobs:
+  build-binpkg:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - stage: amd64-openrc
+            profile: default/linux/amd64/23.0
+            path: amd64/23.0/openrc
+            use: multilib -systemd
+            abis: '64 32'
+          - stage: amd64-nomultilib-systemd
+            profile: default/linux/amd64/23.0/no-multilib/systemd
+            path: amd64/23.0/no-multilib/systemd
+            use: -multilib systemd
+            abis: '64'
+    env:
+      GENTOO_STAGE: ${{ matrix.stage }}
+      GENTOO_PROFILE: ${{ matrix.profile }}
+      BINHOST_PATH: ${{ matrix.path }}
+      GLIBC_USE: ${{ matrix.use }}
+      GLIBC_ABIS: ${{ matrix.abis }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+          problem-matcher: false
+
+      - name: Compile the Dart binhost builder
+        run: dart compile exe packaging/gentoo/binhost.dart -o "$RUNNER_TEMP/ekuos-binhost"
+
+      - name: Prepare Gentoo builder
+        run: |
+          docker build --pull --build-arg "GENTOO_STAGE=$GENTOO_STAGE" \
+            --file packaging/gentoo/Containerfile --tag ekuos-glibc-binhost packaging/gentoo
+
+      - name: Build and test Gentoo binpkg
+        run: |
+          mkdir -p "$RUNNER_TEMP/binhost"
+          docker run --rm \
+            -e GENTOO_PROFILE -e BINHOST_PATH -e GLIBC_USE -e GLIBC_ABIS \
+            -v "$GITHUB_WORKSPACE:/input:ro" \
+            -v "$RUNNER_TEMP/binhost:/output" \
+            -v "$RUNNER_TEMP/ekuos-binhost:/usr/local/bin/ekuos-binhost:ro" \
+            ekuos-glibc-binhost /usr/local/bin/ekuos-binhost build
+
+      - name: Sign package and update index
+        env:
+          BINHOST_GPG_PRIVATE_KEY: ${{ secrets.BINHOST_GPG_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$BINHOST_GPG_PRIVATE_KEY" ]]; then
+            echo '::error::Set the BINHOST_GPG_PRIVATE_KEY Actions secret before publishing.'
+            exit 1
+          fi
+          printf '%s\n' "$BINHOST_GPG_PRIVATE_KEY" | docker run --rm -i --network=none \
+            -e BINHOST_PATH \
+            -v "$RUNNER_TEMP/binhost:/output" \
+            -v "$RUNNER_TEMP/ekuos-binhost:/usr/local/bin/ekuos-binhost:ro" \
+            ekuos-glibc-binhost /usr/local/bin/ekuos-binhost sign
+
+      - name: Save signed binrepo
+        uses: actions/upload-artifact@v7
+        with:
+          name: binhost-${{ matrix.stage }}
+          path: ${{ runner.temp }}/binhost
+          if-no-files-found: error
+          compression-level: 0
+
+  assemble-pages:
+    needs: build-binpkg
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Collect signed binrepos
+        uses: actions/download-artifact@v8
+        with:
+          pattern: binhost-*
+          merge-multiple: true
+          path: binhost
+
+      - name: Verify publication contents
+        run: |
+          test -s binhost/amd64/23.0/openrc/Packages
+          test -s binhost/amd64/23.0/no-multilib/systemd/Packages
+          cmp binhost/amd64/23.0/{openrc,no-multilib/systemd}/signing-key.fingerprint
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: binhost
+
+  deploy:
+    needs: assemble-pages
+    runs-on: ubuntu-26.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy binhost to Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

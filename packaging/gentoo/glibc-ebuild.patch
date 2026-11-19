@@ -1,0 +1,44 @@
+--- a/glibc-2.44-r4.ebuild
++++ b/glibc-2.44-r4.ebuild
+@@ -57 +57,4 @@
+-LICENSE="LGPL-2.1+ BSD HPND ISC inner-net rc PCRE"
++MIMALLOC_VERSION=3.7.0
++SRC_URI+=" https://codeload.github.com/microsoft/mimalloc/tar.gz/refs/tags/v${MIMALLOC_VERSION} -> mimalloc-${MIMALLOC_VERSION}.tar.gz"
++
++LICENSE="LGPL-2.1+ BSD HPND ISC inner-net rc PCRE MIT"
+@@ -1046,0 +1050 @@
++	unpack "mimalloc-${MIMALLOC_VERSION}.tar.gz"
+@@ -1078,0 +1083,6 @@
++	local patch
++	for patch in "${FILESDIR}"/ekuos/*.patch; do
++		eapply "${patch}"
++	done
++	cp "${FILESDIR}/ekuos/eku-malloc.c" malloc/ || die
++
+@@ -1094,0 +1105,4 @@
++	use clang && tc-is-clang || die "ekuOS glibc requires Clang"
++	export libc_cv_sfp_handle_exceptions
++	libc_cv_sfp_handle_exceptions=$(/usr/local/bin/ekuos-binhost soft-float ${glibc__abi_CFLAGS}) || die
++
+@@ -1115 +1129 @@
+-		amd64-x86_64-*|x32-x86_64-*-*-gnux32) myconf+=( $(use_enable cet) ) ;;
++		amd64-x86_64-*|x32-x86_64-*-*-gnux32) myconf+=( --enable-cet=$(usex cet permissive no) ) ;;
+@@ -1160,0 +1175 @@
++		--disable-static-c++-link-check
+@@ -1162 +1177 @@
+-		--enable-fortify-source
++		--enable-fortify-source=3
+@@ -1375 +1390,12 @@
+-	emake -C "$(builddir nptl)"
++	local builddir=$(builddir nptl)
++	local mimalloc="${WORKDIR}/mimalloc-${MIMALLOC_VERSION}"
++	local cet_enabled=no
++	if [[ ${ABI} == amd64 ]] && use cet; then
++		cet_enabled=yes
++	fi
++
++	# Reuse the same Clang allocator build as build.dart for each ABI.
++	/usr/local/bin/ekuos-binhost mimalloc "${mimalloc}" "${builddir}/ekuos-mimalloc.o" \
++		"${cet_enabled}" -march=x86-64 -mtune=generic ${glibc__abi_CFLAGS} || die
++	printf 'ekuos-mimalloc-object := %s/ekuos-mimalloc.o\n' "${builddir}" > "${builddir}/configparms" || die
++	emake -C "${builddir}"

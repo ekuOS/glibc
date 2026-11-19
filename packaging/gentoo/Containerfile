@@ -1,0 +1,4 @@
+ARG GENTOO_STAGE=amd64-openrc
+FROM docker.io/gentoo/portage:latest AS tree
+FROM docker.io/gentoo/stage3:${GENTOO_STAGE}
+COPY --from=tree /var/db/repos/gentoo/ /var/db/repos/gentoo/

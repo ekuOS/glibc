@@ -58,3 +58,7 @@ Run `dart run test.dart` after building, or pass `--output PATH` to select a dif
 The fork was built on x86-64 Linux with Clang and LLD 22.1.8. Dynamic and static smoke tests exercised allocation, alignment, cross-thread frees, and allocation in a `fork` child handler. The shared libc's exported symbol names and versions were also compared with unpatched glibc 2.44 on the same host. These checks do not replace the full glibc test suite.
 
 To check the compiler and linker recorded in the resulting shared library, run `llvm-readelf -p .comment glibc/build/libc.so`.
+
+## Gentoo binary repository
+
+See [Gentoo binhost setup](packaging/gentoo/README.md) for the GitHub Pages deployment and Portage configuration for the signed `sys-libs/glibc` package.

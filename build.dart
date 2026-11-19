@@ -93,6 +93,7 @@ class Options {
 const linkerOptions =
     '--start-no-unused-arguments -fuse-ld=lld '
     '--rtlib=compiler-rt --end-no-unused-arguments';
+const stackClashProtection = '-fstack-clash-protection';
 const cCompiler = 'clang $linkerOptions';
 const cxxCompiler = 'clang++ $linkerOptions';
 const toolchain = {
@@ -256,8 +257,11 @@ Future<void> applyPatches(Directory directory, String source) async {
   }
 }
 
-Future<String> softFloatRuntimeSupport() async {
+Future<String> softFloatRuntimeSupport([
+  List<String> compilerFlags = const [],
+]) async {
   final runtime = await Process.run('clang', [
+    ...compilerFlags,
     '--rtlib=compiler-rt',
     '-print-libgcc-file-name',
   ]);
@@ -281,6 +285,42 @@ Future<String> softFloatRuntimeSupport() async {
       ).hasMatch(symbols.stdout as String)
       ? 'yes'
       : 'no';
+}
+
+Future<void> compileMimalloc(
+  String source,
+  String object, {
+  List<String> compilerFlags = const [],
+  required bool enableCet,
+}) async {
+  await File(object).parent.create(recursive: true);
+  await run('clang', [
+    ...compilerFlags,
+    '-std=gnu11',
+    '-O2',
+    '-fPIC',
+    '-fvisibility=hidden',
+    '-ftls-model=initial-exec',
+    '-fstack-protector-strong',
+    stackClashProtection,
+    '-U_FORTIFY_SOURCE',
+    '-D_FORTIFY_SOURCE=3',
+    // The linker keeps CET properties only when all input objects have them.
+    if (enableCet) '-fcf-protection=full',
+    '-pthread',
+    '-DNDEBUG',
+    '-DMI_SECURE=4',
+    '-DMI_NO_PTHREAD_ATFORK=1',
+    '-DMI_SKIP_COLLECT_ON_EXIT=1',
+    '-DMI_USE_ENVIRON=0',
+    '-Dgetenv=secure_getenv',
+    '-I$source/include',
+    '-c',
+    '$source/src/static.c',
+    '-o',
+    '$object.tmp',
+  ]);
+  await File('$object.tmp').rename(object);
 }
 
 Future<void> build(Options options) async {
@@ -343,9 +383,8 @@ Future<void> build(Options options) async {
   }
   final enableCet =
       (target.stdout as String).trim().split('-').first == 'x86_64';
-  const stackClash = '-fstack-clash-protection';
   final cflags = environment['CFLAGS'] ?? '-g -O2';
-  environment['CFLAGS'] = '$cflags $stackClash';
+  environment['CFLAGS'] = '$cflags $stackClashProtection';
   environment['libc_cv_sfp_handle_exceptions'] =
       await softFloatRuntimeSupport();
   await prepareSource(source, options.repo, options.tag, defaultTag);
@@ -370,33 +409,7 @@ Future<void> build(Options options) async {
   final miBuild = '$mimalloc/build';
   final miObject = '$miBuild/mimalloc.o';
   await prepareSource(miSource, mimallocRepo, mimallocTag, mimallocTag);
-  await Directory(miBuild).create(recursive: true);
-  await run('clang', [
-    '-std=gnu11',
-    '-O2',
-    '-fPIC',
-    '-fvisibility=hidden',
-    '-ftls-model=initial-exec',
-    '-fstack-protector-strong',
-    stackClash,
-    '-U_FORTIFY_SOURCE',
-    '-D_FORTIFY_SOURCE=3',
-    // The linker keeps CET properties only when all input objects have them.
-    if (enableCet) '-fcf-protection=full',
-    '-pthread',
-    '-DNDEBUG',
-    '-DMI_SECURE=4',
-    '-DMI_NO_PTHREAD_ATFORK=1',
-    '-DMI_SKIP_COLLECT_ON_EXIT=1',
-    '-DMI_USE_ENVIRON=0',
-    '-Dgetenv=secure_getenv',
-    '-I$miSource/include',
-    '-c',
-    '$miSource/src/static.c',
-    '-o',
-    '$miObject.tmp',
-  ]);
-  await File('$miObject.tmp').rename(miObject);
+  await compileMimalloc(miSource, miObject, enableCet: enableCet);
   await Directory(output).create(recursive: true);
   await run(
     '$source/configure',
