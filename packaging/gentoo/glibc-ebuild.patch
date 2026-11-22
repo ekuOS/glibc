@@ -47,7 +47,7 @@
 -		--enable-fortify-source
 +		--disable-static-c++-link-check
 +		${hardening}
-@@ -1375 +1396,24 @@
+@@ -1375 +1396,38 @@
 -	emake -C "$(builddir nptl)"
 +	local builddir=$(builddir nptl)
 +	local mimalloc="${WORKDIR}/mimalloc-${MIMALLOC_VERSION}"
@@ -73,3 +73,17 @@
 +			>> "${builddir}/configparms" || die
 +	fi
 +	emake -C "${builddir}"
++	if [[ ${ABI} == x86 ]] && use static-libs; then
++		# Static consumers must also link with compiler-rt alone. Include
++		# only the binary128 helpers (and their dependencies) in libc.a.
++		local -a binary128
++		mapfile -t binary128 < <(
++			llvm-nm --defined-only --extern-only --format=posix "${fallback}" |
++				awk '$2 ~ /^[TW]$/ && $1 ~ /^__[a-z0-9]*tf[a-z0-9]*$/ { print "--undefined=" $1 }' |
++				sort -u
++		)
++		[[ ${#binary128[@]} -gt 0 ]] || die "Missing i386 binary128 builtins"
++		ld.lld -m elf_i386 -r "${binary128[@]}" "${fallback}" \
++			-o "${builddir}/ekuos-binary128.o" || die
++		llvm-ar rs "${builddir}/libc.a" "${builddir}/ekuos-binary128.o" || die
++	fi
