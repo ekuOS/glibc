@@ -12,20 +12,29 @@
 -	# * mold (bug #860900)
 -	tc-ld-force-bfd
 +	# ekuOS uses LLD and the compatibility patches staged by build.dart.
-@@ -1046,0 +1047 @@
+@@ -744 +744,7 @@
+-	export glibc__abi_CFLAGS="$(get_abi_CFLAGS)"
++	export glibc__abi_CFLAGS="$(get_abi_CFLAGS)"
++	if [[ ${ABI} == x86 ]] && tc-is-clang; then
++		# Clang rejects explicit -mfpmath=sse on glibc objects built
++		# with -mgeneral-regs-only. The target still enables SSE2 for
++		# the objects that can use it.
++		glibc__abi_CFLAGS=${glibc__abi_CFLAGS//-mfpmath=sse/}
++	fi
+@@ -1046,0 +1053 @@
 +	unpack "mimalloc-${MIMALLOC_VERSION}.tar.gz"
-@@ -1078,0 +1080,3 @@
+@@ -1078,0 +1086,3 @@
 +	/usr/local/bin/ekuos-binhost prepare "${S}" "${FILESDIR}/ekuos" \
 +		"${FILESDIR}/ekuos/eku-malloc.c" || die
 +
-@@ -1094,0 +1099,6 @@
+@@ -1094,0 +1105,6 @@
 +	use clang && tc-is-clang || die "ekuOS glibc requires Clang"
 +	export libc_cv_sfp_handle_exceptions
 +	libc_cv_sfp_handle_exceptions=$(/usr/local/bin/ekuos-binhost soft-float ${glibc__abi_CFLAGS}) || die
 +	local hardening
 +	hardening=$(/usr/local/bin/ekuos-binhost hardening) || die
 +
-@@ -1115 +1125,6 @@
+@@ -1115 +1131,6 @@
 -		amd64-x86_64-*|x32-x86_64-*-*-gnux32) myconf+=( $(use_enable cet) ) ;;
 +		amd64-x86_64-*)
 +			local cet_flag=--enable-cet=no
@@ -33,12 +42,12 @@
 +				cet_flag=$(/usr/local/bin/ekuos-binhost cet) || die
 +			fi
 +			myconf+=( "${cet_flag}" ) ;;
-@@ -1161,2 +1176,2 @@
+@@ -1161,2 +1182,2 @@
 -		--enable-bind-now
 -		--enable-fortify-source
 +		--disable-static-c++-link-check
 +		${hardening}
-@@ -1375 +1390,12 @@
+@@ -1375 +1396,12 @@
 -	emake -C "$(builddir nptl)"
 +	local builddir=$(builddir nptl)
 +	local mimalloc="${WORKDIR}/mimalloc-${MIMALLOC_VERSION}"
