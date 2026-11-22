@@ -47,7 +47,7 @@
 -		--enable-fortify-source
 +		--disable-static-c++-link-check
 +		${hardening}
-@@ -1375 +1396,21 @@
+@@ -1375 +1396,24 @@
 -	emake -C "$(builddir nptl)"
 +	local builddir=$(builddir nptl)
 +	local mimalloc="${WORKDIR}/mimalloc-${MIMALLOC_VERSION}"
@@ -68,5 +68,8 @@
 +		fallback=$(${glibc__GLIBC_CC} -m32 --rtlib=libgcc -print-libgcc-file-name) || die
 +		[[ ${fallback} = /* && -f ${fallback} ]] || die "Missing i386 libgcc.a"
 +		printf 'libgcc-name += %s\n' "${fallback}" >> "${builddir}/configparms" || die
++		# Unlike libc.so, libm.so does not use libc.so-gnulib.
++		printf '%s\n' 'LDLIBS-m.so += $(libgcc-name)' \
++			>> "${builddir}/configparms" || die
 +	fi
 +	emake -C "${builddir}"
