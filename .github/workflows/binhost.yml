@@ -23,10 +23,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      GENTOO_PROFILE: default/linux/amd64/23.0/no-multilib/systemd
-      BINHOST_PATH: amd64/23.0/no-multilib/systemd
-      GLIBC_USE: -multilib systemd
-      GLIBC_ABIS: '64'
+      GENTOO_PROFILE: default/linux/amd64/23.0/llvm/systemd
+      BINHOST_PATH: amd64/23.0/llvm/systemd
+      GLIBC_USE: multilib stack-realign systemd
+      GLIBC_ABIS: '64 32'
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -99,7 +99,7 @@ jobs:
 
       - name: Verify publication contents
         run: |
-          cd binhost/amd64/23.0/no-multilib/systemd
+          cd binhost/amd64/23.0/llvm/systemd
           test -s Packages
           test -s signing-key.fingerprint
           sha256sum --check SHA256SUMS
@@ -121,10 +121,10 @@ jobs:
           <main>
             <h1>ekuOS Gentoo binhost</h1>
             <p>This binhost distributes a signed <code>sys-libs/glibc</code> package built with Clang and using mimalloc as its default allocator.</p>
-            <p><strong>Supported profile:</strong> <code>default/linux/amd64/23.0/no-multilib/systemd</code>. OpenRC and multilib are not supported. Check your profile with <code>eselect profile show</code> and try the package in a disposable Gentoo environment first.</p>
+            <p><strong>Supported profile:</strong> <code>default/linux/amd64/23.0/llvm/systemd</code>, with 64-bit and 32-bit support. Check your profile with <code>eselect profile show</code> and try the package in a disposable Gentoo environment first.</p>
 
             <h2>1. Verify the signing key</h2>
-            <p>Save the <a href="amd64/23.0/no-multilib/systemd/signing-key.asc">public key</a> as <code>signing-key.asc</code>. Compare its full fingerprint with one you obtained from the maintainer through a separate, trusted channel. Only if they match, set <code>fingerprint</code> to the verified value and import the key.</p>
+            <p>Save the <a href="amd64/23.0/llvm/systemd/signing-key.asc">public key</a> as <code>signing-key.asc</code>. Compare its full fingerprint with one you obtained from the maintainer through a separate, trusted channel. Only if they match, set <code>fingerprint</code> to the verified value and import the key.</p>
             <pre><code>gpg --show-keys --fingerprint signing-key.asc
           fingerprint=REPLACE_WITH_VERIFIED_FULL_FINGERPRINT
           sudo getuto
@@ -137,18 +137,18 @@ jobs:
             <p>Add the following to <code>/etc/portage/binrepos.conf</code>, or to a file inside it if it is a directory.</p>
             <pre><code>[ekuos-glibc]
           priority = 9999
-          sync-uri = https://ekuos.github.io/glibc/amd64/23.0/no-multilib/systemd/
+           sync-uri = https://ekuos.github.io/glibc/amd64/23.0/llvm/systemd/
           verify-signature = true</code></pre>
             <p>Gentoo masks the <code>clang</code> USE flag for glibc. Add the following to <code>/etc/portage/profile/package.use.mask</code> to unmask it for this version only.</p>
             <pre><code>=sys-libs/glibc-2.44-r4 -clang</code></pre>
             <p>Add the following to <code>package.use</code>. If this version is keyworded as testing, also add <code>=sys-libs/glibc-2.44-r4 ~amd64</code> to <code>package.accept_keywords</code>.</p>
-            <pre><code>=sys-libs/glibc-2.44-r4 cet clang multiarch ssp static-libs systemd -multilib</code></pre>
+            <pre><code>=sys-libs/glibc-2.44-r4 cet clang multiarch multilib ssp stack-realign static-libs systemd</code></pre>
 
             <h2>3. Preview and install</h2>
             <pre><code>sudo emerge --pretend --verbose --getbinpkg --usepkgonly --binpkg-respect-use=y \
             --reinstall-atoms=sys-libs/glibc =sys-libs/glibc-2.44-r4</code></pre>
             <p>Confirm that Portage selects <code>ekuos-glibc</code>, then replace <code>--pretend --verbose</code> with <code>--ask --oneshot</code> and run the command again. To return to the official package, disable this binhost and reinstall the official glibc package.</p>
-            <p><a href="amd64/23.0/no-multilib/systemd/Packages">Package index</a> · <a href="amd64/23.0/no-multilib/systemd/SHA256SUMS">SHA-256 checksums</a> · <a href="https://github.com/ekuOS/glibc/blob/main/packaging/gentoo/README.md">Detailed instructions</a></p>
+            <p><a href="amd64/23.0/llvm/systemd/Packages">Package index</a> · <a href="amd64/23.0/llvm/systemd/SHA256SUMS">SHA-256 checksums</a> · <a href="https://github.com/ekuOS/glibc/blob/main/packaging/gentoo/README.md">Detailed instructions</a></p>
           </main>
           </body>
           </html>' > binhost/index.html

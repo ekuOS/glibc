@@ -1,6 +1,6 @@
 # Gentoo binary repository
 
-The binhost publishes signed GPKG packages as `sys-libs/glibc` in slot `2.2`. It targets `=sys-libs/glibc-2.44-r4` on amd64 systemd without multilib, with `CHOST=x86_64-pc-linux-gnu` and an x86-64 baseline. OpenRC and multilib profiles are not published. The Dart binhost builder invokes Gentoo's ebuild and install phases with Clang, LLD, and compiler-rt. It reuses `build.dart` for patching glibc, compiling mimalloc, and selecting the hardening flags, including permissive CET.
+The binhost publishes signed GPKG packages as `sys-libs/glibc` in slot `2.2`. It targets `=sys-libs/glibc-2.44-r4` on amd64 LLVM/systemd with multilib (`x86_64-pc-linux-gnu`), including both x86-64 and i386. The Dart binhost builder invokes Gentoo's ebuild and install phases with Clang, LLD, and compiler-rt. It reuses `build.dart` for patching glibc, compiling mimalloc, and selecting the hardening flags, including permissive CET on x86-64.
 
 Before publication, each build installs its generated binpkg in a disposable Gentoo container and runs the shared and static libc and allocator probes for each ABI it ships. It also checks ELF hardening for the amd64 libc and loader and confirms the loader was built with Clang and LLD. The signing step runs without networking in a fresh container and regenerates the Portage index. Each release includes the corresponding sources and a `SHA256SUMS` file for the signed package and source archive. When updating the release, update the ebuild patch and CPV in `binhost.dart` together. Update the dated Gentoo stage and Portage image tags together and run a build-only dispatch before publishing.
 
@@ -27,14 +27,14 @@ The workflow uses GitHub's built-in Pages deployment token. A push to `main` bui
 
 ## Configure Portage to prefer the binhost
 
-Use the deployment's Pages URL with the `amd64/23.0/no-multilib/systemd/` path. This repository is only for the `default/linux/amd64/23.0/no-multilib/systemd` Gentoo profile.
+Use the deployment's Pages URL with the `amd64/23.0/llvm/systemd/` path. This repository is only for the `default/linux/amd64/23.0/llvm/systemd` Gentoo profile.
 
 Add this section under `/etc/portage/binrepos.conf`, either in the existing file or in a file inside that directory:
 
 ```ini
 [ekuos-glibc]
 priority = 9999
-sync-uri = https://ekuos.github.io/glibc/amd64/23.0/no-multilib/systemd/
+sync-uri = https://ekuos.github.io/glibc/amd64/23.0/llvm/systemd/
 verify-signature = true
 ```
 
@@ -54,7 +54,7 @@ On the target system, allow the exact version in `package.accept_keywords` when 
 =sys-libs/glibc-2.44-r4 ~amd64
 ```
 
-Gentoo masks the `clang` USE flag for glibc on this profile. Add `=sys-libs/glibc-2.44-r4 -clang` to `/etc/portage/profile/package.use.mask` to remove that mask for this version only. Then set the package's USE flags to match the published `Packages` index: `cet clang multiarch ssp static-libs systemd -multilib`. The binpkg uses the `gentoo` repository identity, so a local mask on `sys-libs/glibc::gentoo` also masks these packages. Preview the binary-only reinstall and confirm that Portage selects `ekuos-glibc` before applying it:
+Allow glibc's experimental `clang` USE flag with `=sys-libs/glibc-2.44-r4 -clang` in `/etc/portage/profile/package.use.mask`. Then set the package's USE flags to match the published `Packages` index: `cet clang multiarch multilib ssp stack-realign static-libs systemd`. The binpkg uses the `gentoo` repository identity, so a local mask on `sys-libs/glibc::gentoo` also masks these packages. Preview the binary-only reinstall and confirm that Portage selects `ekuos-glibc` before applying it:
 
 ```sh
 sudo emerge --pretend --verbose --getbinpkg --usepkgonly --binpkg-respect-use=y \

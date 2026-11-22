@@ -116,10 +116,10 @@ Future<void> checkInstalledPackage(
     final libc = await File('/usr/$libdir/libc.so.6').resolveSymbolicLinks();
     final unwind = await capture('clang', [
       '-m$abi',
-      '-print-file-name=libgcc_eh.a',
+      '-print-file-name=libunwind.a',
     ], environment: environment);
     if (!await File(unwind).exists()) {
-      throw glibc.BuildFailure('Missing libgcc_eh.a for x86-$abi');
+      throw glibc.BuildFailure('Missing LLVM libunwind.a for x86-$abi');
     }
     for (final fixture in ['libc', 'allocator']) {
       for (final static in [false, true]) {
@@ -136,6 +136,7 @@ Future<void> checkInstalledPackage(
           '-pthread',
           '-fuse-ld=lld',
           '--rtlib=compiler-rt',
+          '--unwindlib=libunwind',
           if (static) ...['-static', '-nostdlib++'],
           '$project/tests/$fixture.cpp',
           if (static) ...[
@@ -334,7 +335,7 @@ Future<void> buildPackage(String output) async {
     'package.accept_keywords/ekuos-glibc',
     '$atom ~amd64',
   );
-  // Gentoo masks this experimental flag on the stock GCC profiles.
+  // Allow the experimental Clang glibc build for this exact revision.
   await writePortageSetting('profile/package.use.mask', '$atom -clang');
   await writePortageSetting(
     'package.use/ekuos-glibc',
