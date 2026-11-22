@@ -109,17 +109,19 @@ Future<void> writePortageSetting(String path, String content) async {
 Future<void> checkInstalledPackage(
   Directory scratch,
   List<String> abis,
-  Map<String, String> environment,
-) async {
+  Map<String, String> environment, {
+  required bool llvmProfile,
+}) async {
+  final unwindLibrary = llvmProfile ? 'libunwind.a' : 'libgcc_eh.a';
   for (final abi in abis) {
     final libdir = abi == '64' ? 'lib64' : 'lib';
     final libc = await File('/usr/$libdir/libc.so.6').resolveSymbolicLinks();
     final unwind = await capture('clang', [
       '-m$abi',
-      '-print-file-name=libunwind.a',
+      '-print-file-name=$unwindLibrary',
     ], environment: environment);
     if (!await File(unwind).exists()) {
-      throw glibc.BuildFailure('Missing LLVM libunwind.a for x86-$abi');
+      throw glibc.BuildFailure('Missing $unwindLibrary for x86-$abi');
     }
     for (final fixture in ['libc', 'allocator']) {
       for (final static in [false, true]) {
@@ -136,7 +138,7 @@ Future<void> checkInstalledPackage(
           '-pthread',
           '-fuse-ld=lld',
           '--rtlib=compiler-rt',
-          '--unwindlib=libunwind',
+          if (llvmProfile) '--unwindlib=libunwind',
           if (static) ...['-static', '-nostdlib++'],
           '$project/tests/$fixture.cpp',
           if (static) ...[
@@ -376,7 +378,12 @@ Future<void> buildPackage(String output) async {
 
   final scratch = await Directory.systemTemp.createTemp('ekuos-binhost-');
   try {
-    await checkInstalledPackage(scratch, abis, llvmEnvironment);
+    await checkInstalledPackage(
+      scratch,
+      abis,
+      llvmEnvironment,
+      llvmProfile: profile.endsWith('/llvm/systemd'),
+    );
     await archiveSources(
       output,
       scratch,

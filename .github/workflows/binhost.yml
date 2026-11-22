@@ -22,9 +22,19 @@ jobs:
     if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && !inputs.publish)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: llvm
+            profile: default/linux/amd64/23.0/llvm/systemd
+            stage3: amd64-llvm-systemd-20261116
+          - flavor: multilib
+            profile: default/linux/amd64/23.0/systemd
+            stage3: amd64-systemd-20261116
     env:
-      GENTOO_PROFILE: default/linux/amd64/23.0/llvm/systemd
-      BINHOST_PATH: amd64/23.0/llvm/systemd
+      GENTOO_PROFILE: ${{ matrix.profile }}
+      BINHOST_PATH: amd64/23.0/${{ matrix.flavor }}/systemd
       GLIBC_USE: multilib stack-realign systemd
       GLIBC_ABIS: '64 32'
     steps:
@@ -44,7 +54,7 @@ jobs:
 
       - name: Prepare Gentoo builder
         run: |
-          docker build --pull \
+          docker build --pull --build-arg GENTOO_STAGE3=${{ matrix.stage3 }} \
             --file packaging/gentoo/Containerfile --tag ekuos-glibc-binhost packaging/gentoo
 
       - name: Build and test Gentoo binpkg
@@ -81,7 +91,7 @@ jobs:
         if: github.event_name == 'push' || inputs.publish
         uses: actions/upload-artifact@v7
         with:
-          name: gentoo-binhost
+          name: gentoo-binhost-${{ matrix.flavor }}
           path: ${{ runner.temp }}/binhost
           if-no-files-found: error
           compression-level: 0
@@ -94,15 +104,16 @@ jobs:
       - name: Download signed binrepo
         uses: actions/download-artifact@v8
         with:
-          name: gentoo-binhost
+          pattern: gentoo-binhost-*
           path: binhost
+          merge-multiple: true
 
-      - name: Verify publication contents
-        run: |
-          cd binhost/amd64/23.0/llvm/systemd
-          test -s Packages
-          test -s signing-key.fingerprint
-          sha256sum --check SHA256SUMS
+      - name: Verify LLVM publication
+        working-directory: binhost/amd64/23.0/llvm/systemd
+        run: sha256sum --check SHA256SUMS
+      - name: Verify standard multilib publication
+        working-directory: binhost/amd64/23.0/multilib/systemd
+        run: sha256sum --check SHA256SUMS
 
       - name: Write the binhost landing page
         run: |
@@ -121,7 +132,7 @@ jobs:
           <main>
             <h1>ekuOS Gentoo binhost</h1>
             <p>This binhost distributes a signed <code>sys-libs/glibc</code> package built with Clang and using mimalloc as its default allocator.</p>
-            <p><strong>Supported profile:</strong> <code>default/linux/amd64/23.0/llvm/systemd</code>, with 64-bit and 32-bit support. Check your profile with <code>eselect profile show</code> and try the package in a disposable Gentoo environment first.</p>
+            <p><strong>Supported profiles:</strong> <code>default/linux/amd64/23.0/llvm/systemd</code> and standard multilib <code>default/linux/amd64/23.0/systemd</code>, both with 64-bit and 32-bit support. Check your profile with <code>eselect profile show</code> and try the package in a disposable Gentoo environment first.</p>
 
             <h2>1. Verify the signing key</h2>
             <p>Save the <a href="amd64/23.0/llvm/systemd/signing-key.asc">public key</a> as <code>signing-key.asc</code>. Compare its full fingerprint with one you obtained from the maintainer through a separate, trusted channel. Only if they match, set <code>fingerprint</code> to the verified value and import the key.</p>
@@ -138,7 +149,8 @@ jobs:
             <pre><code>[ekuos-glibc]
           priority = 9999
            sync-uri = https://ekuos.github.io/glibc/amd64/23.0/llvm/systemd/
-          verify-signature = true</code></pre>
+           verify-signature = true</code></pre>
+            <p>For standard <code>23.0/systemd</code>, use <code>amd64/23.0/multilib/systemd/</code> in the URL instead. See its <a href="amd64/23.0/multilib/systemd/Packages">package index</a> and <a href="amd64/23.0/multilib/systemd/SHA256SUMS">checksums</a>.</p>
             <p>Gentoo masks the <code>clang</code> USE flag for glibc. Add the following to <code>/etc/portage/profile/package.use.mask</code> to unmask it for this version only.</p>
             <pre><code>=sys-libs/glibc-2.44-r4 -clang</code></pre>
             <p>Add the following to <code>package.use</code>. If this version is keyworded as testing, also add <code>=sys-libs/glibc-2.44-r4 ~amd64</code> to <code>package.accept_keywords</code>.</p>

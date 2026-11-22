@@ -1,6 +1,6 @@
 # Gentoo binary repository
 
-The binhost publishes signed GPKG packages as `sys-libs/glibc` in slot `2.2`. It targets `=sys-libs/glibc-2.44-r4` on amd64 LLVM/systemd with multilib (`x86_64-pc-linux-gnu`), including both x86-64 and i386. The Dart binhost builder invokes Gentoo's ebuild and install phases with Clang, LLD, and compiler-rt. It reuses `build.dart` for patching glibc, compiling mimalloc, and selecting the hardening flags, including permissive CET on x86-64.
+The binhost publishes signed GPKG packages as `sys-libs/glibc` in slot `2.2`. It targets `=sys-libs/glibc-2.44-r4` on amd64 with both x86-64 and i386. Each profile is built and tested separately. The Dart binhost builder invokes Gentoo's ebuild and install phases with Clang, LLD, and compiler-rt. It reuses `build.dart` for patching glibc, compiling mimalloc, and selecting the hardening flags, including permissive CET on x86-64.
 
 Before publication, each build installs its generated binpkg in a disposable Gentoo container and runs the shared and static libc and allocator probes for each ABI it ships. It also checks ELF hardening for the amd64 libc and loader and confirms the loader was built with Clang and LLD. The signing step runs without networking in a fresh container and regenerates the Portage index. Each release includes the corresponding sources and a `SHA256SUMS` file for the signed package and source archive. When updating the release, update the ebuild patch and CPV in `binhost.dart` together. Update the dated Gentoo stage and Portage image tags together and run a build-only dispatch before publishing.
 
@@ -27,7 +27,12 @@ The workflow uses GitHub's built-in Pages deployment token. A push to `main` bui
 
 ## Configure Portage to prefer the binhost
 
-Use the deployment's Pages URL with the `amd64/23.0/llvm/systemd/` path. This repository is only for the `default/linux/amd64/23.0/llvm/systemd` Gentoo profile.
+Choose the path matching your Gentoo profile:
+
+| Gentoo profile | Pages path |
+| --- | --- |
+| `default/linux/amd64/23.0/llvm/systemd` | `amd64/23.0/llvm/systemd/` |
+| `default/linux/amd64/23.0/systemd` (standard multilib) | `amd64/23.0/multilib/systemd/` |
 
 Add this section under `/etc/portage/binrepos.conf`, either in the existing file or in a file inside that directory:
 
