@@ -5,7 +5,7 @@
 +MIMALLOC_VERSION=3.7.0
 +SRC_URI+=" https://codeload.github.com/microsoft/mimalloc/tar.gz/refs/tags/v${MIMALLOC_VERSION} -> mimalloc-${MIMALLOC_VERSION}.tar.gz"
 +
-+LICENSE="LGPL-2.1+ BSD HPND ISC inner-net rc PCRE MIT"
++LICENSE="LGPL-2.1+ BSD HPND ISC inner-net rc PCRE MIT multilib? ( libgcc )"
 @@ -662,4 +665 @@
 -	# glibc does not work with non-bfd (for various reasons):
 -	# * gold (bug #269274)
@@ -47,7 +47,7 @@
 -		--enable-fortify-source
 +		--disable-static-c++-link-check
 +		${hardening}
-@@ -1375 +1396,12 @@
+@@ -1375 +1396,21 @@
 -	emake -C "$(builddir nptl)"
 +	local builddir=$(builddir nptl)
 +	local mimalloc="${WORKDIR}/mimalloc-${MIMALLOC_VERSION}"
@@ -60,4 +60,13 @@
 +	/usr/local/bin/ekuos-binhost mimalloc "${mimalloc}" "${builddir}/ekuos-mimalloc.o" \
 +		"${cet_enabled}" -march=x86-64 -mtune=generic ${glibc__abi_CFLAGS} || die
 +	printf 'ekuos-mimalloc-object := %s/ekuos-mimalloc.o\n' "${builddir}" > "${builddir}/configparms" || die
++	if [[ ${ABI} == x86 ]]; then
++		# LLVM 22's i386 builtins omit the software binary128 routines.
++		# Keep compiler-rt first and resolve only missing builtins from
++		# the i386 libgcc archive; this adds no shared libgcc dependency.
++		local fallback
++		fallback=$(${glibc__GLIBC_CC} -m32 --rtlib=libgcc -print-libgcc-file-name) || die
++		[[ ${fallback} = /* && -f ${fallback} ]] || die "Missing i386 libgcc.a"
++		printf 'libgcc-name += %s\n' "${fallback}" >> "${builddir}/configparms" || die
++	fi
 +	emake -C "${builddir}"

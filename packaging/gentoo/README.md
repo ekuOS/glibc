@@ -34,6 +34,10 @@ Choose the path matching your Gentoo profile:
 | `default/linux/amd64/23.0/llvm/systemd` | `amd64/23.0/llvm/systemd/` |
 | `default/linux/amd64/23.0/systemd` (standard multilib) | `amd64/23.0/multilib/systemd/` |
 
+The i386 build links compiler-rt first and uses the static i386 `libgcc.a`
+for binary128 builtins missing from LLVM 22. This does not change the
+compiler or add a shared `libgcc` dependency.
+
 Add this section under `/etc/portage/binrepos.conf`, either in the existing file or in a file inside that directory:
 
 ```ini

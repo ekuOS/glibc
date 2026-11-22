@@ -138,7 +138,7 @@ Future<void> checkInstalledPackage(
           '-pthread',
           '-fuse-ld=lld',
           '--rtlib=compiler-rt',
-          if (llvmProfile) '--unwindlib=libunwind',
+          if (llvmProfile) ...['-stdlib=libc++', '--unwindlib=libunwind'],
           if (static) ...['-static', '-nostdlib++'],
           '$project/tests/$fixture.cpp',
           if (static) ...[
