@@ -1,0 +1,15 @@
+--- a/sysdeps/i386/nptl/tls.h
++++ b/sysdeps/i386/nptl/tls.h
+@@ -249,5 +249,7 @@
+-    { int __res;							      \
+-      asm volatile ("xchgl %1, %0"					      \
+-		    : "=r" (__res)					      \
+-		    : "m" (((struct pthread __seg_gs *)0)->header.gscope_flag), \
+-		      "0" (THREAD_GSCOPE_FLAG_UNUSED));			      \
++    { int __res = THREAD_GSCOPE_FLAG_UNUSED;				      \
++      /* Clang drops the segment override on the asm memory operand.  */     \
++      asm volatile ("xchgl %0, %%gs:%c1"				      \
++		    : "+r" (__res)					      \
++		    : "i" (offsetof (struct pthread, header.gscope_flag))      \
++		    : "memory");					      \
++									      \
