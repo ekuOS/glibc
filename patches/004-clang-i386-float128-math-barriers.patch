@@ -1,0 +1,37 @@
+--- a/sysdeps/x86/fpu/math-barriers.h
++++ b/sysdeps/x86/fpu/math-barriers.h
+@@ -22,7 +22,18 @@
+-#ifdef __SSE2_MATH__
++/* Clang on i386 cannot put a software _Float128 value in an XMM register
++   for an inline-asm operand, even when SSE2 math is enabled.  */
++#if defined __clang__ && defined __i386__
++# define X86_FLOAT128_MEMORY_OPERAND 1
++#else
++# define X86_FLOAT128_MEMORY_OPERAND 0
++#endif
++
++#ifdef __SSE2_MATH__
+ # define math_opt_barrier(x)						\
+   ({ __typeof(x) __x;							\
+-     if (sizeof (x) <= sizeof (double)					\
++     if (X86_FLOAT128_MEMORY_OPERAND					\
++	 && __builtin_types_compatible_p (__typeof (x), _Float128))	\
++       { __x = (x); __asm ("" : "+m" (__x)); }				\
++     else if (sizeof (x) <= sizeof (double)				\
+-	|| __builtin_types_compatible_p (__typeof (x), _Float128))	\
++	|| __builtin_types_compatible_p (__typeof (x), _Float128))	\
+        __asm ("" : "=x" (__x) : "0" (x));				\
+      else								\
+@@ -33,4 +44,10 @@
+-    if (sizeof (x) <= sizeof (double)					\
++    if (X86_FLOAT128_MEMORY_OPERAND					\
++	&& __builtin_types_compatible_p (__typeof (x), _Float128))	\
++      {									\
++	__typeof (x) __x = (x);						\
++	__asm __volatile ("" : : "m" (__x));				\
++      }									\
++    else if (sizeof (x) <= sizeof (double)				\
+-	|| __builtin_types_compatible_p (__typeof (x), _Float128))	\
++	|| __builtin_types_compatible_p (__typeof (x), _Float128))	\
+       __asm __volatile ("" : : "x" (x));				\
+     else								\
